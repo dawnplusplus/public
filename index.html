@@ -16,7 +16,8 @@
       --ok: #4ade80;
       --border: #1f2a44;
     }
-    html, body { height: 100%; margin: 0; background: radial-gradient(1000px 600px at 50% -10%, #14203a 0%, var(--bg) 60%); color: var(--text); font-family: system-ui, Segoe UI, Roboto, Helvetica, Arial; }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; background: radial-gradient(1000px 600px at 50% -10%, #14203a 0%, var(--bg) 60%); color: var(--text); font-family: ui-sans-serif, system-ui, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; }
     .wrap { min-height: 100%; display: grid; place-items: center; padding: 24px; }
     .card {
       width: min(920px, 92vw);
@@ -50,6 +51,8 @@
       cursor: pointer; transition: transform .06s ease, filter .2s ease, box-shadow .15s ease;
       box-shadow: 0 10px 20px rgba(37,99,235,.35), inset 0 1px 0 rgba(255,255,255,.15);
     }
+    button:hover { filter: brightness(1.05); }
+    button:active { transform: translateY(1px); }
     .status {
       margin-left: auto; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
       padding: 10px 12px; border-radius: 10px; min-width: 190px; text-align: center; border: 1px solid var(--border);
@@ -84,17 +87,23 @@
               <stop offset="100%" stop-color="#2b416b"/>
             </radialGradient>
           </defs>
+          <!-- Vault body -->
           <circle cx="80" cy="80" r="72" fill="url(#g)" stroke="#263656" stroke-width="6"/>
+          <!-- Hinges -->
           <rect x="130" y="52" width="14" height="16" rx="3" fill="#2d3f66"/>
           <rect x="130" y="92" width="14" height="16" rx="3" fill="#2d3f66"/>
+          <!-- Dial ring -->
           <circle cx="80" cy="80" r="38" fill="#091322" stroke="#5e7fb0" stroke-width="3"/>
+          <!-- Tick marks -->
           <g stroke="#99b7ee" stroke-width="2">
             <line x1="80" y1="44" x2="80" y2="50"/>
             <line x1="80" y1="110" x2="80" y2="104"/>
             <line x1="44" y1="80" x2="50" y2="80"/>
             <line x1="110" y1="80" x2="104" y2="80"/>
           </g>
+          <!-- Dial center -->
           <circle cx="80" cy="80" r="10" fill="#cfe2ff" stroke="#38548a" stroke-width="3"/>
+          <!-- Handle -->
           <g stroke="#b9d2ff" stroke-linecap="round" stroke-width="6">
             <line x1="80" y1="60" x2="80" y2="40"/>
             <line x1="60" y1="80" x2="40" y2="80"/>
@@ -102,6 +111,7 @@
             <line x1="80" y1="100" x2="80" y2="120"/>
           </g>
         </svg>
+
         <div>
           <h1 id="ff-title" class="title">FINAL FIREWALL ENGAGED.</h1>
           <p class="subtitle">ACCESS REQUIRES MASTER OVERRIDE PHRASE.</p>
@@ -129,11 +139,46 @@
       </div>
 
       <div class="footer" aria-hidden="true">Security Monitor v10 • Event ID: FF-2026-01</div>
-      <noscript><div class="hint" style="color:#ffb4c0">JavaScript is required to verify the phrase.</div></noscript>
+      <noscript>
+        <div class="hint" style="color:#ffb4c0">JavaScript is required to verify the phrase.</div>
+      </noscript>
     </div>
   </div>
 
   <script>
+    // ================================
+    // Client-only validator for GitHub Pages
+    // - Does NOT include the solution phrase anywhere.
+    // - Compares the SHA-256 hash of the student input to a known good hash.
+    // - On success, reveals a deterministic success code for email verification.
+    // ================================
+
+    // SHA-256 (hex) of the correct phrase (lowercase hex). Computed offline.
+    const EXPECTED_HASH_HEX = "3085345eb9127de3da8419e32b67a36c4b68a960d3c3f83272733e9952db54f6";
+
+    async function sha256Hex(input) {
+      const data = new TextEncoder().encode(input);
+      const digest = await crypto.subtle.digest("SHA-256", data);
+      return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, "0")).join("");
+    }
+
+    function setStatus(el, msg, ok) {
+      el.textContent = msg;
+      el.classList.toggle("ok", !!ok);
+      el.classList.toggle("err", !ok);
+    }
+
+    // Deterministic success code derived from the hash (shown only after a correct entry).
+    // You can verify codes offline by re-deriving from the known hash.
+    function deriveSuccessCodeFromHash(hashHex) {
+      // Create a readable 4-4-4 pattern from scattered positions of the hash.
+      const pick = i => hashHex[i].toUpperCase();
+      const segment1 = (pick(1)+pick(3)+pick(5)+pick(7)).replace(/[^A-Z0-9]/g,"X");
+      const segment2 = (pick(9)+pick(11)+pick(13)+pick(15)).replace(/[^A-Z0-9]/g,"X");
+      const segment3 = (pick(17)+pick(19)+pick(21)+pick(23)).replace(/[^A-Z0-9]/g,"X");
+      return `${segment1}-${segment2}-${segment3}`;
+    }
+
     const form = document.getElementById("ff-form");
     const phraseEl = document.getElementById("phrase");
     const statusEl = document.getElementById("status");
@@ -141,46 +186,30 @@
     const successCodeEl = document.getElementById("successCode");
     const copyBtn = document.getElementById("copyBtn");
 
-    function setStatusOk(msg) {
-      statusEl.textContent = msg;
-      statusEl.classList.remove("err");
-      statusEl.classList.add("ok");
-    }
-    function setStatusErr(msg) {
-      statusEl.textContent = msg;
-      statusEl.classList.remove("ok");
-      statusEl.classList.add("err");
-      codeBox.style.display = "none";
-    }
-
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
-      setStatusErr("Verifying…");
+      setStatus(statusEl, "Verifying…", false);
+      codeBox.style.display = "none";
+
+      const candidate = (phraseEl.value || "").trim();
+      if (!candidate) {
+        setStatus(statusEl, "PHRASE REQUIRED", false);
+        return;
+      }
+
       try {
-        const candidate = (phraseEl.value || "").trim();
-        if (!candidate) {
-          setStatusErr("PHRASE REQUIRED");
-          return;
-        }
-        const resp = await fetch("/api/verify", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ phrase: candidate })
-        });
-        const data = await resp.json();
-        if (resp.ok && data?.ok) {
-          setStatusOk("ACCESS GRANTED");
-          if (data.code) {
-            successCodeEl.textContent = data.code;
-            codeBox.style.display = "block";
-          }
+        const candidateHash = await sha256Hex(candidate);
+        if (candidateHash === EXPECTED_HASH_HEX) {
+          setStatus(statusEl, "ACCESS GRANTED", true);
+          const code = deriveSuccessCodeFromHash(candidateHash);
+          successCodeEl.textContent = code;
+          codeBox.style.display = "block";
         } else {
-          const msg = data?.message || "PHRASE INCORRECT";
-          setStatusErr(msg);
+          setStatus(statusEl, "PHRASE INCORRECT", false);
         }
       } catch (err) {
         console.error(err);
-        setStatusErr("SYSTEM ERROR");
+        setStatus(statusEl, "SYSTEM ERROR", false);
       }
     });
 
@@ -190,7 +219,7 @@
         copyBtn.textContent = "Copied!";
         setTimeout(() => (copyBtn.textContent = "Copy"), 1200);
       } catch {
-        // ignore
+        // ignore clipboard errors
       }
     });
   </script>
