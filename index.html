@@ -17,11 +17,17 @@
       --border: #1f2a44;
     }
     * { box-sizing: border-box; }
-    html, body { height: 100%; margin: 0; background: radial-gradient(1000px 600px at 50% -10%, #14203a 0%, var(--bg) 60%); color: var(--text); font-family: ui-sans-serif, system-ui, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; }
+    html, body {
+      height: 100%;
+      margin: 0;
+      background: radial-gradient(1000px 600px at 50% -10%, #14203a 0%, var(--bg) 60%);
+      color: var(--text);
+      font-family: ui-sans-serif, system-ui, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+    }
     .wrap { min-height: 100%; display: grid; place-items: center; padding: 24px; }
     .card {
       width: min(920px, 92vw);
-      background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)) , var(--panel);
+      background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)), var(--panel);
       border: 1px solid var(--border);
       border-radius: 16px;
       padding: 28px;
@@ -29,7 +35,11 @@
       position: relative;
       overflow: hidden;
     }
-    .glow { position: absolute; inset: -40% -10% auto auto; width: 420px; height: 420px; background: radial-gradient(closest-side, rgba(62,166,255,0.18), rgba(62,166,255,0) 70%); filter: blur(8px); pointer-events: none; }
+    .glow {
+      position: absolute; inset: -40% -10% auto auto; width: 420px; height: 420px;
+      background: radial-gradient(closest-side, rgba(62,166,255,0.18), rgba(62,166,255,0) 70%);
+      filter: blur(8px); pointer-events: none;
+    }
     header { display: grid; grid-template-columns: 120px 1fr; gap: 20px; align-items: center; margin-bottom: 18px; }
     .title { margin: 0; line-height: 1.2; font-size: clamp(20px, 3.5vw, 30px); letter-spacing: .04em; }
     .subtitle { margin: 6px 0 0; color: var(--sub); font-size: clamp(13px, 2.5vw, 16px); }
@@ -69,7 +79,10 @@
     .codeLabel { font-size: 12px; color: var(--sub); margin-bottom: 6px; text-transform: uppercase; letter-spacing: .06em; }
     .codeValue { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 16px; color: #eafff0; word-break: break-all; }
     .copyBtn { margin-left: 8px; background: #18c29c; color: #052018; border: none; padding: 6px 10px; border-radius: 8px; font-weight: 700; cursor: pointer; }
-    @media (max-width: 560px) { header { grid-template-columns: 1fr; text-align: center; } .status { margin-left: 0; width: 100%; } }
+    @media (max-width: 560px) {
+      header { grid-template-columns: 1fr; text-align: center; }
+      .status { margin-left: 0; width: 100%; }
+    }
   </style>
 </head>
 <body>
@@ -131,7 +144,7 @@
       </form>
 
       <div id="codeBox" class="codeBox" aria-live="polite">
-        <div class="codeLabel">Success code — email to your instructor (<strong>your.email@school.org</strong>):</div>
+        <div class="codeLabel">Success code — email to your instructor:</div>
         <div class="codeValue"><span id="successCode">—</span>
           <button id="copyBtn" class="copyBtn" type="button">Copy</button>
         </div>
@@ -147,31 +160,104 @@
 
   <script>
     // ================================
-    // Client-only validator for GitHub Pages
-    // - Does NOT include the solution phrase anywhere.
-    // - Compares the SHA-256 hash of the student input to a known good hash.
-    // - On success, reveals a deterministic success code for email verification.
+    // Robust client-only validator for GitHub Pages
+    // - Normalizes input (dash variants, whitespace).
+    // - Uses Web Crypto when available, otherwise a tiny SHA-256 fallback.
+    // - Optional diagnostics to display computed hash for troubleshooting (?debug=1).
     // ================================
 
-    // SHA-256 (hex) of the correct phrase (lowercase hex). Computed offline.
+    // EXPECTED HASH (lowercase hex) for the correct master phrase.
     const EXPECTED_HASH_HEX = "3085345eb9127de3da8419e32b67a36c4b68a960d3c3f83272733e9952db54f6";
 
-    async function sha256Hex(input) {
+    // --- Normalization ---
+    // Replace EN/EM dashes with ASCII '-', normalize quotes, collapse spaces around hyphens, collapse multiple spaces, trim.
+    function normalizeInput(s) {
+      if (!s) return "";
+      let out = s
+        .replace(/\u2013|\u2014/g, "-")          // EN dash / EM dash -> hyphen
+        .replace(/[\u2018\u2019]/g, "'")         // curly single quotes -> straight
+        .replace(/[\u201C\u201D]/g, '"')         // curly double quotes -> straight
+        .replace(/\s*-\s*/g, "-")                // spaces around hyphens -> none
+        .replace(/ {2,}/g, " ")                  // collapse 2+ spaces
+        .trim();
+      return out;
+    }
+
+    // --- SHA-256 helpers ---
+    async function sha256HexWebCrypto(input) {
       const data = new TextEncoder().encode(input);
       const digest = await crypto.subtle.digest("SHA-256", data);
       return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, "0")).join("");
     }
 
-    function setStatus(el, msg, ok) {
-      el.textContent = msg;
-      el.classList.toggle("ok", !!ok);
-      el.classList.toggle("err", !ok);
+    // Minimal SHA-256 fallback implementation (for environments without crypto.subtle)
+    function sha256HexFallback(ascii) {
+      function rightRotate(value, amount) { return (value>>>amount) | (value<<(32 - amount)); }
+      var mathPow = Math.pow, maxWord = mathPow(2, 32), lengthProperty = 'length';
+      var i, j, result = '', words = [];
+      var asciiBitLength = ascii[lengthProperty]*8;
+      var hash = sha256HexFallback.h = sha256HexFallback.h || [];
+      var k = sha256HexFallback.k = sha256HexFallback.k || [];
+      var primeCounter = k[lengthProperty], isComposite = {};
+      for (var candidate = 2; primeCounter < 64; candidate++) {
+        if (!isComposite[candidate]) {
+          for (i = 0; i < 313; i += candidate) isComposite[i] = candidate;
+          hash[primeCounter] = (mathPow(candidate, .5)*maxWord)|0;
+          k[primeCounter++] = (mathPow(candidate, 1/3)*maxWord)|0;
+        }
+      }
+      ascii += '\x80';
+      while (ascii[lengthProperty]%64 - 56) ascii += '\x00';
+      for (i = 0; i < ascii[lengthProperty]; i++) {
+        j = ascii.charCodeAt(i);
+        if (j>>8) return; // ASCII check
+        words[i>>2] |= j << ((3 - i)%4)*8;
+      }
+      words[words[lengthProperty]] = (asciiBitLength/maxWord)|0;
+      words[words[lengthProperty]] = (asciiBitLength);
+      for (j = 0; j < words[lengthProperty];) {
+        var w = words.slice(j, j += 16), oldHash = hash;
+        hash = hash.slice(0, 8);
+        for (i = 0; i < 64; i++) {
+          var w15 = w[i - 15], w2 = w[i - 2];
+          var a = hash[0], e = hash[4];
+          var temp1 = hash[7]
+            + (rightRotate(e, 6) ^ rightRotate(e, 11) ^ rightRotate(e, 25))
+            + ((e&hash[5])^((~e)&hash[6]))
+            + k[i]
+            + (w[i] = (i < 16) ? w[i] : (
+                w[i - 16]
+                + (rightRotate(w15, 7) ^ rightRotate(w15, 18) ^ (w15>>>3))
+                + w[i - 7]
+                + (rightRotate(w2, 17) ^ rightRotate(w2, 19) ^ (w2>>>10))
+              )|0);
+          var temp2 = (rightRotate(a, 2) ^ rightRotate(a, 13) ^ rightRotate(a, 22))
+            + ((a&hash[1])^(a&hash[2])^(hash[1]&hash[2]));
+          hash = [(temp1 + temp2)|0].concat(hash);
+          hash[4] = (hash[4] + temp1)|0;
+        }
+        for (i = 0; i < 8; i++) hash[i] = (hash[i] + oldHash[i])|0;
+      }
+      for (i = 0; i < 8; i++) {
+        for (j = 3; j + 1; j--) {
+          var b = (hash[i] >> (j * 8)) & 255;
+          result += ((b < 16) ? 0 : '') + b.toString(16);
+        }
+      }
+      return result;
     }
 
-    // Deterministic success code derived from the hash (shown only after a correct entry).
-    // You can verify codes offline by re-deriving from the known hash.
+    async function sha256Hex(input) {
+      try {
+        if (window.crypto && crypto.subtle && crypto.subtle.digest) {
+          return await sha256HexWebCrypto(input);
+        }
+      } catch (_) { /* fall back */ }
+      return sha256HexFallback(input);
+    }
+
+    // --- Success code from hash (displayed only on success) ---
     function deriveSuccessCodeFromHash(hashHex) {
-      // Create a readable 4-4-4 pattern from scattered positions of the hash.
       const pick = i => hashHex[i].toUpperCase();
       const segment1 = (pick(1)+pick(3)+pick(5)+pick(7)).replace(/[^A-Z0-9]/g,"X");
       const segment2 = (pick(9)+pick(11)+pick(13)+pick(15)).replace(/[^A-Z0-9]/g,"X");
@@ -179,6 +265,7 @@
       return `${segment1}-${segment2}-${segment3}`;
     }
 
+    // --- UI wiring ---
     const form = document.getElementById("ff-form");
     const phraseEl = document.getElementById("phrase");
     const statusEl = document.getElementById("status");
@@ -186,30 +273,54 @@
     const successCodeEl = document.getElementById("successCode");
     const copyBtn = document.getElementById("copyBtn");
 
+    function setStatusOk(msg) {
+      statusEl.textContent = msg;
+      statusEl.classList.remove("err");
+      statusEl.classList.add("ok");
+    }
+    function setStatusErr(msg) {
+      statusEl.textContent = msg;
+      statusEl.classList.remove("ok");
+      statusEl.classList.add("err");
+      codeBox.style.display = "none";
+    }
+
+    // Optional diagnostics
+    const params = new URLSearchParams(location.search);
+    const debug = params.get("debug") === "1";
+
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
-      setStatus(statusEl, "Verifying…", false);
-      codeBox.style.display = "none";
-
-      const candidate = (phraseEl.value || "").trim();
-      if (!candidate) {
-        setStatus(statusEl, "PHRASE REQUIRED", false);
-        return;
-      }
+      setStatusErr("Verifying…");
 
       try {
+        const raw = (phraseEl.value || "");
+        const candidate = normalizeInput(raw);
+
+        if (!candidate) {
+          setStatusErr("PHRASE REQUIRED");
+          return;
+        }
+
         const candidateHash = await sha256Hex(candidate);
+
+        if (debug) {
+          console.log("[FF DEBUG] normalized:", JSON.stringify(candidate));
+          console.log("[FF DEBUG] hash:", candidateHash);
+          console.log("[FF DEBUG] expected:", EXPECTED_HASH_HEX);
+        }
+
         if (candidateHash === EXPECTED_HASH_HEX) {
-          setStatus(statusEl, "ACCESS GRANTED", true);
+          setStatusOk("ACCESS GRANTED");
           const code = deriveSuccessCodeFromHash(candidateHash);
           successCodeEl.textContent = code;
           codeBox.style.display = "block";
         } else {
-          setStatus(statusEl, "PHRASE INCORRECT", false);
+          setStatusErr("PHRASE INCORRECT");
         }
       } catch (err) {
         console.error(err);
-        setStatus(statusEl, "SYSTEM ERROR", false);
+        setStatusErr("SYSTEM ERROR");
       }
     });
 
