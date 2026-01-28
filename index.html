@@ -1,4 +1,3 @@
-
 <!doctype html>
 <html lang="en">
 <head>
@@ -26,7 +25,7 @@
     }
     .wrap { min-height: 100%; display: grid; place-items: center; padding: 24px; }
     .card {
-      width: min(920px, 92vw);
+      width: min(960px, 92vw);
       background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)), var(--panel);
       border: 1px solid var(--border);
       border-radius: 16px;
@@ -45,15 +44,19 @@
     .subtitle { margin: 6px 0 0; color: var(--sub); font-size: clamp(13px, 2.5vw, 16px); }
     .panel { margin-top: 18px; display: grid; gap: 12px; }
     label { font-weight: 600; color: var(--sub); letter-spacing: .06em; text-transform: uppercase; font-size: 12px; }
-    textarea {
-      width: 100%; min-height: 120px; resize: vertical;
+    input[type="email"], textarea {
+      width: 100%;
       background: #0b1222; color: var(--text);
       border: 1px solid var(--border); border-radius: 10px;
-      padding: 14px 16px; line-height: 1.4; font-size: 14px;
+      padding: 12px 14px; line-height: 1.4; font-size: 14px;
       outline: none; box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
     }
-    textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(62,166,255,0.18); }
-    .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    textarea { min-height: 120px; resize: vertical; }
+    input[type="email"]:focus, textarea:focus {
+      border-color: var(--accent); box-shadow: 0 0 0 3px rgba(62,166,255,0.18);
+    }
+    .row { display: grid; grid-template-columns: 1fr 240px; gap: 12px; }
+    .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
     button {
       background: linear-gradient(180deg, #2a79ff, #2563eb);
       color: white; border: none; border-radius: 10px; padding: 12px 16px;
@@ -79,8 +82,15 @@
     .codeLabel { font-size: 12px; color: var(--sub); margin-bottom: 6px; text-transform: uppercase; letter-spacing: .06em; }
     .codeValue { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 16px; color: #eafff0; word-break: break-all; }
     .copyBtn { margin-left: 8px; background: #18c29c; color: #052018; border: none; padding: 6px 10px; border-radius: 8px; font-weight: 700; cursor: pointer; }
-    @media (max-width: 560px) {
+    .token {
+      display: grid; gap: 6px; align-content: start; padding: 10px 12px;
+      background: #0b1222; border: 1px solid var(--border); border-radius: 10px;
+    }
+    .tokenLabel { font-size: 12px; color: var(--sub); text-transform: uppercase; letter-spacing: .06em; }
+    .tokenValue { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 16px; color: #bfe6ff; }
+    @media (max-width: 640px) {
       header { grid-template-columns: 1fr; text-align: center; }
+      .row { grid-template-columns: 1fr; }
       .status { margin-left: 0; width: 100%; }
     }
   </style>
@@ -132,11 +142,25 @@
       </header>
 
       <form id="ff-form" class="panel" autocomplete="off">
+        <div class="row">
+          <div>
+            <label for="email">Your school email (used to generate a unique success code):</label>
+            <input id="email" name="email" type="email" placeholder="student@school.org" />
+            <div class="hint">We derive a one-time code from your email + session token. Include both when you email your instructor.</div>
+          </div>
+
+          <div class="token">
+            <div class="tokenLabel">Session Token (copy into your email):</div>
+            <div id="sessionToken" class="tokenValue">—</div>
+          </div>
+        </div>
+
         <div>
           <label for="phrase">Enter phrase (ALL CAPS, hyphen‑separated):</label>
           <textarea id="phrase" name="phrase" spellcheck="false" placeholder="TYPE PHRASE HERE..."></textarea>
-          <div class="hint">Tip: Use EXACT spacing and punctuation.</div>
+          <div class="hint">Tip: Use EXACT spacing and punctuation. Hyphens must be the plain '-' character.</div>
         </div>
+
         <div class="actions">
           <button id="btn-check" type="submit">Verify Phrase</button>
           <output id="status" class="status" role="status" aria-live="polite">Awaiting input…</output>
@@ -144,11 +168,11 @@
       </form>
 
       <div id="codeBox" class="codeBox" aria-live="polite">
-        <div class="codeLabel">Success code — email to your instructor:</div>
+        <div class="codeLabel">Success code — email this to your instructor (<strong>your.email@school.org</strong>) with your email and the Session Token:</div>
         <div class="codeValue"><span id="successCode">—</span>
           <button id="copyBtn" class="copyBtn" type="button">Copy</button>
         </div>
-        <div class="hint">Keep this code private; it proves you unlocked the Final Firewall.</div>
+        <div class="hint">Format suggestion: “My Email: <em>me@school.org</em> • Session Token: <em>ABC123</em> • Success Code: <em>WXYZ-1234-ABCD</em>”.</div>
       </div>
 
       <div class="footer" aria-hidden="true">Security Monitor v10 • Event ID: FF-2026-01</div>
@@ -160,37 +184,48 @@
 
   <script>
     // ================================
-    // Robust client-only validator for GitHub Pages
+    // Robust client-only validator with unique, verifiable codes
     // - Normalizes input (dash variants, whitespace).
-    // - Uses Web Crypto when available, otherwise a tiny SHA-256 fallback.
-    // - Optional diagnostics to display computed hash for troubleshooting (?debug=1).
+    // - Uses Web Crypto if available; falls back to a tiny SHA-256.
+    // - Success code = SHA256( correctPhraseHash + "|" + email + "|" + sessionToken ), then prettified.
+    // - Instructor can re-derive the code offline to verify authenticity.
     // ================================
 
     // EXPECTED HASH (lowercase hex) for the correct master phrase.
     const EXPECTED_HASH_HEX = "3085345eb9127de3da8419e32b67a36c4b68a960d3c3f83272733e9952db54f6";
 
-    // --- Normalization ---
-    // Replace EN/EM dashes with ASCII '-', normalize quotes, collapse spaces around hyphens, collapse multiple spaces, trim.
-    function normalizeInput(s) {
-      if (!s) return "";
-      let out = s
-        .replace(/\u2013|\u2014/g, "-")          // EN dash / EM dash -> hyphen
-        .replace(/[\u2018\u2019]/g, "'")         // curly single quotes -> straight
-        .replace(/[\u201C\u201D]/g, '"')         // curly double quotes -> straight
-        .replace(/\s*-\s*/g, "-")                // spaces around hyphens -> none
-        .replace(/ {2,}/g, " ")                  // collapse 2+ spaces
-        .trim();
+    // Generate a session token on page load (A-Z + digits, no ambiguous chars).
+    function generateSessionToken(len = 6) {
+      const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+      const arr = new Uint8Array(len);
+      if (window.crypto && crypto.getRandomValues) crypto.getRandomValues(arr);
+      let out = "";
+      for (let i = 0; i < len; i++) {
+        const v = (arr[i] || Math.floor(Math.random()*256));
+        out += alphabet[v % alphabet.length];
+      }
       return out;
     }
 
-    // --- SHA-256 helpers ---
+    // Replace EN/EM dashes with '-', normalize quotes, collapse spaces, trim.
+    function normalizeInput(s) {
+      if (!s) return "";
+      return s
+        .replace(/\u2013|\u2014/g, "-")
+        .replace(/[\u2018\u2019]/g, "'")
+        .replace(/[\u201C\u201D]/g, '"')
+        .replace(/\s*-\s*/g, "-")
+        .replace(/ {2,}/g, " ")
+        .trim();
+    }
+
     async function sha256HexWebCrypto(input) {
       const data = new TextEncoder().encode(input);
       const digest = await crypto.subtle.digest("SHA-256", data);
       return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, "0")).join("");
     }
 
-    // Minimal SHA-256 fallback implementation (for environments without crypto.subtle)
+    // Tiny SHA-256 fallback (public domain style)
     function sha256HexFallback(ascii) {
       function rightRotate(value, amount) { return (value>>>amount) | (value<<(32 - amount)); }
       var mathPow = Math.pow, maxWord = mathPow(2, 32), lengthProperty = 'length';
@@ -256,22 +291,38 @@
       return sha256HexFallback(input);
     }
 
-    // --- Success code from hash (displayed only on success) ---
-    function deriveSuccessCodeFromHash(hashHex) {
-      const pick = i => hashHex[i].toUpperCase();
-      const segment1 = (pick(1)+pick(3)+pick(5)+pick(7)).replace(/[^A-Z0-9]/g,"X");
-      const segment2 = (pick(9)+pick(11)+pick(13)+pick(15)).replace(/[^A-Z0-9]/g,"X");
-      const segment3 = (pick(17)+pick(19)+pick(21)+pick(23)).replace(/[^A-Z0-9]/g,"X");
-      return `${segment1}-${segment2}-${segment3}`;
+    // Make a human-friendly 12-char code (no O/0 or I/1), grouped 4-4-4
+    function prettyCodeFromHex(hex, length = 12) {
+      const map = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+      let out = "";
+      for (let i = 0; i < hex.length && out.length < length; i += 2) {
+        const byte = parseInt(hex.substr(i, 2), 16);
+        out += map[byte % map.length];
+      }
+      const s = out.slice(0, length);
+      return s.replace(/(.{4})(?=.)/g, "$1-");
+    }
+
+    async function deriveUniqueCode(phraseHashHex, emailLower, sessionToken) {
+      // Deterministic payload the instructor can re-derive offline
+      const payload = (phraseHashHex + "|" + (emailLower || "") + "|" + sessionToken).toUpperCase();
+      const codeHash = await sha256Hex(payload);
+      return prettyCodeFromHex(codeHash, 12);
     }
 
     // --- UI wiring ---
     const form = document.getElementById("ff-form");
+    const emailEl = document.getElementById("email");
     const phraseEl = document.getElementById("phrase");
     const statusEl = document.getElementById("status");
     const codeBox = document.getElementById("codeBox");
     const successCodeEl = document.getElementById("successCode");
     const copyBtn = document.getElementById("copyBtn");
+    const sessionTokenEl = document.getElementById("sessionToken");
+
+    // Generate and show Session Token on load
+    const SESSION_TOKEN = generateSessionToken(6);
+    sessionTokenEl.textContent = SESSION_TOKEN;
 
     function setStatusOk(msg) {
       statusEl.textContent = msg;
@@ -285,7 +336,6 @@
       codeBox.style.display = "none";
     }
 
-    // Optional diagnostics
     const params = new URLSearchParams(location.search);
     const debug = params.get("debug") === "1";
 
@@ -294,26 +344,34 @@
       setStatusErr("Verifying…");
 
       try {
-        const raw = (phraseEl.value || "");
-        const candidate = normalizeInput(raw);
+        const rawPhrase = (phraseEl.value || "");
+        const candidate = normalizeInput(rawPhrase);
 
         if (!candidate) {
           setStatusErr("PHRASE REQUIRED");
           return;
         }
 
+        const emailLower = (emailEl.value || "").trim().toLowerCase();
+        if (!emailLower) {
+          setStatusErr("EMAIL REQUIRED");
+          return;
+        }
+
         const candidateHash = await sha256Hex(candidate);
 
         if (debug) {
-          console.log("[FF DEBUG] normalized:", JSON.stringify(candidate));
-          console.log("[FF DEBUG] hash:", candidateHash);
-          console.log("[FF DEBUG] expected:", EXPECTED_HASH_HEX);
+          console.log("[FF DEBUG] normalized phrase:", JSON.stringify(candidate));
+          console.log("[FF DEBUG] candidate hash:", candidateHash);
+          console.log("[FF DEBUG] expected   hash:", EXPECTED_HASH_HEX);
+          console.log("[FF DEBUG] emailLower:", emailLower);
+          console.log("[FF DEBUG] sessionToken:", SESSION_TOKEN);
         }
 
         if (candidateHash === EXPECTED_HASH_HEX) {
           setStatusOk("ACCESS GRANTED");
-          const code = deriveSuccessCodeFromHash(candidateHash);
-          successCodeEl.textContent = code;
+          const uniqueCode = await deriveUniqueCode(candidateHash, emailLower, SESSION_TOKEN);
+          successCodeEl.textContent = uniqueCode;
           codeBox.style.display = "block";
         } else {
           setStatusErr("PHRASE INCORRECT");
